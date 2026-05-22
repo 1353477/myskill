@@ -1,0 +1,27 @@
+# Workflow customization surface for project-migration.
+
+[workflow]
+
+# Steps to run before the standard activation (greeting).
+# Append-only on override.
+activation_steps_prepend = []
+
+# Steps to run after greet but before the workflow begins.
+# Append-only on override.
+activation_steps_append = []
+
+# Persistent facts carried for the whole workflow run.
+# Entries prefixed `file:` load file contents as facts.
+# Append-only on override.
+persistent_facts = []
+
+# Language for all conversational output.
+communication_language = "中文"
+
+# Language for generated documents and code comments.
+document_output_language = "中文"
+
+[output]
+
+# Document output directory (relative to target_project).
+docs_dir = "docs/migration"

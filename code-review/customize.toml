@@ -1,0 +1,23 @@
+# Workflow customization surface for code-review.
+
+[workflow]
+
+# Language for all conversational output.
+communication_language = "中文"
+
+# Language for generated documents.
+document_output_language = "中文"
+
+[review]
+
+# Default effort level: quick / standard / thorough.
+default_effort = "standard"
+
+# Default focus areas (empty = all dimensions).
+# Example: ["security", "robustness"]
+focus_areas = []
+
+[output]
+
+# Document output directory (relative to project root).
+docs_dir = "docs/review"

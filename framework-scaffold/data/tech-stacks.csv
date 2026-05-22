@@ -1,0 +1,4 @@
+stack_id,language,framework,framework_version,build_tool,config_format,init_command,dir_convention,package_manager,db_migration_tool,starter_url
+spring-boot,Java,Spring Boot,3.3.x,Maven/Gradle,YAML,spring init --dependencies=web,data-jpa,validation,lombok --build=maven --java-version=17,src/main/java + src/main/resources + src/test/java,maven,-flyway,https://start.spring.io
+fastapi,Python,FastAPI,0.115.x,uv/pip,.env,fastapi new or manual setup,app/ + tests/ + alembic/,pip or uv,alembic,manual
+nestjs,TypeScript,NestJS,10.x,npm/pnpm,JSON/YAML,nest new project-name,src/ + test/,npm or pnpm,prisma or typeorm,nest-cli
