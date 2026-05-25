@@ -50,21 +50,27 @@ skill/
 
 ## 安装
 
-将 skill 目录复制到 Claude Code 的 skills 目录：
+运行安装脚本，通过 junction/symlink 自动链接 skill 目录到各 CLI 工具。链接创建后，源文件的更新会自动同步，无需再手动复制。
+
+| 方式 | 命令 | 适用环境 |
+|------|------|---------|
+| `install.bat` | 双击或命令行运行 | Windows |
+| `install.sh` | `bash install.sh` | Git Bash / macOS / Linux |
+
+### 支持的目标
+
+编辑安装脚本顶部的 `TARGETS` 配置启用或禁用：
 
 ```bash
-# 复制到 Claude Code skills 目录
-cp -r skill/* ~/.claude/skills/
+TARGETS=(
+    "$HOME/.claude/skills"       # Claude Code（默认启用）
+    # "$HOME/.codex/skills"      # Codex（安装后取消注释）
+)
 ```
 
-或通过符号链接：
+### 排除列表
 
-```bash
-ln -s /path/to/skill/code-review ~/.claude/skills/code-review
-ln -s /path/to/skill/crafting-quality-code ~/.claude/skills/crafting-quality-code
-ln -s /path/to/skill/framework-scaffold ~/.claude/skills/framework-scaffold
-ln -s /path/to/skill/project-migration ~/.claude/skills/project-migration
-```
+以下目录不会被链接：`.git`、`.claude`、`.github`、`bmad`（自留，不安装）。
 
 ## 支持的技术栈
 
