@@ -104,6 +104,11 @@ description: Use when writing or refactoring functions, classes, or modules. Ens
 
 ### 注释：只解释 why
 
+- 好注释解释决策原因（约束、权衡、历史背景），坏注释复述代码行为
+- 需要注释时，先想能否通过更好的命名消除它
+- 代码本身就是最好的文档
+- 复杂代码块可在关键步骤处加简短注释，帮助读者快速理解流程
+
 ```
 ❌ Bad:  // increment counter by 1
         counter++;
@@ -113,9 +118,11 @@ description: Use when writing or refactoring functions, classes, or modules. Ens
 
 ✅ Good: // Retry up to 3 times because the downstream service has transient failures
 ✅ Good: // Using UTC here because the legacy API expects UTC timestamps
+✅ Good: // 查找已有标签，不存在则新建
+✅ Good: // 按需关联标签到目标对象
 ```
 
-如果注释是在复述代码做了什么，删掉它，把变量/函数命名改好。
+如果注释在逐行复述显而易见的代码行为，删掉它，改好命名。但复杂逻辑中标注关键步骤的简短注释是合理的。
 
 ### 数据：不信任外部输入
 
@@ -158,7 +165,7 @@ Go:       defer resource.Close()
 - 函数超过 40 行 → 职责可能不单一，拆分
 - catch 块是空的或只有日志 → 吞异常，处理或传播
 - 新建了抽象类/接口但只有一个实现 → 可能过度设计
-- 需要写注释解释"这段代码做了什么" → 命名不够好
+- 逐行注释解释显而易见的代码行为 → 命名不够好（复杂逻辑中标注关键步骤除外）
 - 修改 A 模块时担心影响 B 模块 → 耦合太高
 - 函数内部 new 了外部依赖 → 依赖不可注入
 
