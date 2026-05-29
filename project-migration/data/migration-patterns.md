@@ -19,6 +19,55 @@
 | 8+ | 21 | `java.awt.Window#show/hide` 移除 | 使用 `setVisible()` |
 | 17 | 21 | 临时变量（`var`）在 switch 模式匹配中增强 | 可简化条件逻辑 |
 
+### Java 17 → 21 现代语言特性迁移
+
+| 特性 | 迁移价值 | 迁移方式 |
+|------|---------|---------|
+| 虚拟线程（正式可用） | I/O 密集场景性能大幅提升 | `Executors.newVirtualThreadPerTaskExecutor()` 替代线程池，配合 `Semaphore` 控制并发 |
+| Record 类 | 减少 DTO 样板代码，自带 equals/hashCode/toString | 替代 Lombok `@Value` 或手动不可变 DTO |
+| Sealed Classes | 有限继承、穷举检查、类型安全 | 替代枚举+接口组合模式 |
+| Switch 模式匹配（正式可用） | 简化类型判断和条件分支 | 替代 if-else instanceof 链 |
+| 顺序集合 `SequencedCollection` | 统一有序集合 API | 替代 `List.get(0)`/`List.get(list.size()-1)` 等不一致写法 |
+
+**虚拟线程迁移注意：**
+- 不要池化虚拟线程，它们本身很轻量（每个仅占用几 KB 栈内存）
+- 用 `Semaphore` 控制对外部服务的并发调用，而非固定大小线程池
+- `synchronized` 块会钉住载体线程，优先改用 `ReentrantLock`
+- 确保第三方库不使用 `synchronized` 锁定共享资源（如 HikariCP 需升级到 5.1.0+）
+
+**Record 迁移示例：**
+
+```java
+// 迁移前：Lombok @Data
+@Data
+public class UserDTO {
+    private Long id;
+    private String name;
+    private String email;
+}
+
+// 迁移后：Record（不可变，自带 equals/hashCode/toString）
+public record UserDTO(Long id, String name, String email) {}
+```
+
+**Switch 模式匹配迁移示例：**
+
+```java
+// 迁移前：if-else instanceof 链
+if (obj instanceof String s) {
+    return s.length();
+} else if (obj instanceof Integer i) {
+    return i;
+}
+
+// 迁移后：switch 模式匹配
+return switch (obj) {
+    case String s -> s.length();
+    case Integer i -> i;
+    default -> 0;
+};
+```
+
 ### javax → jakarta 命名空间迁移
 
 这是 Spring Boot 2→3 和 Java EE→Jakarta EE 迁移中最常见的变更。几乎所有 `javax.*` 包都需要重命名为 `jakarta.*`。
@@ -58,6 +107,22 @@
 
 **推荐迁移顺序：** Java 版本升级 → 依赖版本升级 → javax→jakarta → Spring Security 重构 → 配置属性调整 → 测试
 
+### Spring Boot 3.x 小版本升级
+
+| 源版本 | 目标版本 | 变更项 | 迁移方式 |
+|:---:|:---:|--------|----------|
+| 3.2 | 3.3+ | Rest Client 支持改进 | 可从 `RestTemplate` 迁移到 `RestClient` |
+| 3.2 | 3.3+ | `spring.application.name` 最低要求 | 确保 `application.yml` 中有 `spring.application.name` |
+| 3.3 | 3.4+ | CDS 支持 | 可配置 `spring.main.cds.enabled=true` 提升启动速度 |
+| 3.3 | 3.5+ | Spring AI 正式集成 | 可使用 `spring-ai-starter` 集成 LLM |
+| 3.4 | 3.5+ | 虚拟线程默认启用 | `spring.threads.virtual.enabled=true`，移除手动配置 |
+| 3.x | 3.x | Spring Cloud 版本必须匹配 | Spring Boot 3.4.x → Spring Cloud 2024.0.x |
+
+**注意事项：**
+- Spring Boot 3.x 小版本通常向后兼容，但仍需检查 `Deprecation` 列表
+- Spring Cloud 版本必须与 Spring Boot 版本严格匹配，否则会有兼容性问题
+- Spring Cloud Alibaba 版本也需与 Spring Cloud 版本对应
+
 ### 框架迁移
 
 | 源框架 | 目标框架 | 关键差异 | 注意事项 |
@@ -68,12 +133,146 @@
 | XML 配置 | 注解配置 | `@Configuration` 替代 XML | 逐步迁移可行 |
 | Spring Security OAuth2 | Spring Authorization Server | 架构完全不同 | 建议重写认证模块 |
 
+### MyBatis → MyBatis-Plus 迁移
+
+| 变更项 | MyBatis | MyBatis-Plus | 迁移方式 |
+|--------|---------|-------------|----------|
+| 实体定义 | 普通 POJO | `@TableName` + `@TableId` 注解 | 添加注解，兼容现有 POJO |
+| CRUD | 手写 XML SQL | 继承 `BaseMapper<T>` 自动生成 | 简单 CRUD 直接继承，复杂查询保留 XML |
+| 条件构造 | XML `<if>`/`<where>` | `QueryWrapper`/`LambdaQueryWrapper` | 优先用 Lambda 版本避免字段名硬编码 |
+| 分页 | 手写 PageHelper 或自定义 | `IPage` + `MybatisPlusInterceptor` | 配置分页插件即可 |
+| ID 生成 | 手动或数据库自增 | `@TableId(type = IdType.ASSIGN_UUID)` | 支持 UUID、雪花算法等多种策略 |
+| 逻辑删除 | 手写 SQL 条件 | `@TableLogic` 注解 | 自动追加 `deleted = 0` 条件 |
+| 自动填充 | 手动赋值 | `@TableField(fill = FieldFill.INSERT)` | 实现 `MetaObjectHandler` |
+
+**迁移建议：**
+- 兼容性：MyBatis-Plus 完全兼容原生 MyBatis XML 映射，可渐进式迁移
+- 优先级：先让 `Mapper` 继承 `BaseMapper<T>` 获得基础 CRUD，再逐步用 `Wrapper` 替换简单 XML
+- 保留复杂 SQL：多表关联、复杂统计等仍用 XML，不必强行迁移
+- 注意事项：`BaseMapper` 的 `selectList` 等方法不要与自定义 XML 方法重名
+
 ### 构建工具
 
 | 源 | 目标 | 注意事项 |
 |----|------|---------|
 | Maven | Gradle | 插件生态差异，`pom.xml` → `build.gradle` |
 | Ant | Maven/Gradle | 需要重新组织目录结构 |
+
+### 微服务基础设施迁移
+
+| 组件 | 迁移场景 | 关键配置 | 注意事项 |
+|------|---------|---------|--------|
+| Spring Cloud Nacos | 服务注册/配置中心 | `spring.cloud.nacos.discovery.server-addr` | 替代 Eureka/Consul 时注意命名空间映射 |
+| Spring Cloud OpenFeign | 服务间调用 | `@FeignClient(name="service-name")` | 替代 RestTemplate，注意超时和重试配置 |
+| Redis (Lettuce) | 缓存/会话 | `spring.data.redis.*` | Lettuce 替代 Jedis 需注意连接池配置差异 |
+| MinIO | 对象存储 | S3 兼容协议 | 替代本地文件存储时需考虑迁移方案 |
+| gRPC | 跨语言服务通信 | Protobuf 定义 | 替代 REST 时注意序列化和流式处理差异 |
+| Knife4j | API 文档 | `knife4j.enable=true` | 替代传统 Swagger UI，注解兼容 |
+
+**Nacos 迁移注意事项：**
+- 配置格式：`bootstrap.yml` 需配置 Nacos 地址和命名空间
+- 多环境：通过 `namespace` 隔离 dev/sit/prod
+- 配置优先级：Nacos 远程配置 > 本地配置
+- 服务注册：确保 `spring.application.name` 全局唯一
+
+**Feign 迁移注意事项：**
+- 超时配置：`spring.cloud.openfeign.client.config.default.connectTimeout`
+- 开启 Sentinel 熔断：`@FeignClient(fallbackFactory = XxxFallback.class)`
+- 日志级别：`Logger.Level.FULL` 仅在 debug 时使用
+- 拆分 Feign 模块到独立 jar，避免循环依赖
+
+### Spring AI 迁移
+
+| 变更项 | 旧版 | 新版 | 迁移方式 |
+|--------|------|------|---------|
+| 核心 API | `ChatModel.call()` | `ChatClient.prompt().call()` | ChatClient 是新的高层 API，ChatModel 仍可用 |
+| 流式输出 | `ChatModel.stream()` 手动处理 | `ChatClient.prompt().stream()` | 返回 `Flux<ChatResponse>` |
+| 模型配置 | 手动创建 `OpenAiChatModel` | `spring.ai.openai.chat.options.*` 自动配置 | Spring Boot Starter 自动注入 |
+| 向量存储 | 手动创建 `EmbeddingModel` | `spring.ai.vectorstore.*` 自动配置 | 支持 Milvus/PgVector/Chroma |
+| Prompt 模板 | 字符串拼接 | `PromptTemplate` + `#{variable}` | 声明式模板管理 |
+| 工具调用 | 无 | `@Tool` 注解自动注册 | Spring AI 1.0+ 支持 |
+
+**Spring AI 版本兼容：**
+- Spring AI 1.0.x → Spring Boot 3.3.x
+- Spring AI 1.1.x → Spring Boot 3.4.x/3.5.x
+- Spring AI Alibaba 版本需与 Spring AI 版本匹配
+
+**迁移建议：**
+- 先升级 Spring Boot，再引入 Spring AI Starter
+- ChatModel 是低层 API，ChatClient 是推荐的高层 API
+- 自定义 LLM Provider 需实现 `ChatModel` 接口
+
+### SSE 流式推送迁移
+
+| 方案 | 适用场景 | 优点 | 缺点 |
+|------|---------|------|------|
+| Servlet `response.getWriter()` | 传统 Spring MVC | 简单直接 | 手动管理连接，无心跳 |
+| Spring `SseEmitter` | Spring MVC | 框架管理生命周期 | 单机适用，集群需 Redis 广播 |
+| WebFlux `Flux<ServerSentEvent>` | 响应式栈 | 背压支持、天然异步 | 需 WebFlux 依赖 |
+| WebSocket | 双向通信 | 全双工 | 协议更重，LLM 场景通常不需要双向 |
+
+**SseEmitter 迁移要点：**
+- 连接超时：`new SseEmitter(timeout)` 设置合理超时（建议 0 = 无限，配合心跳）
+- 心跳保活：定时发送空事件防止连接被代理/防火墙关闭
+- 异常处理：`onCompletion`/`onTimeout`/`onError` 回调中清理资源
+- 集群场景：SSE 连接绑定 JVM，多实例需 Redis Pub/Sub 广播事件
+
+### Redis Stream 消息队列迁移
+
+| 源方案 | 目标方案 | 适用场景 | 迁移要点 |
+|--------|---------|---------|---------|
+| RabbitMQ | Redis Stream | 轻量级异步任务 | 语义差异（ACK 机制不同） |
+| Kafka | Redis Stream | 中小规模事件流 | Redis Stream 不支持分区，吞吐量有限 |
+| 手动队列 | Redis Stream | 任务分发 | 使用 Consumer Group 实现消费者组 |
+
+**Redis Stream 关键概念映射：**
+- `XADD` = 发送消息
+- `XREADGROUP` = 消费消息（Consumer Group）
+- `XACK` = 确认消息
+- `XPENDING` = 查看待处理消息
+- `StreamMessageListenerContainer`（Spring Data Redis）= 消费者容器
+
+**迁移注意：**
+- Redis Stream 消息不会自动删除，需配置 `MAXLEN` 或 `XTRIM`
+- Consumer Group 需提前创建（`XGROUP CREATE`），否则启动报错
+- 消息确认（ACK）失败会导致重复消费，消费逻辑需幂等
+
+### 向量数据库迁移
+
+| 源方案 | 目标方案 | 迁移要点 |
+|--------|---------|---------|
+| 无向量库 → Milvus | 首次引入 | 设计 Collection Schema（字段、索引类型、维度） |
+| Elasticsearch 向量检索 → Milvus | 替换向量引擎 | dense 向量 + sparse 向量（BM25）的 hybrid search 配置 |
+| Pinecone → Milvus | 自托管 | 数据导出/导入，索引类型映射（IVF_FLAT/HNSW） |
+| Chroma → Milvus | 生产就绪 | Schema 设计差异，Chroma 自动建索引而 Milvus 需显式创建 |
+
+**Milvus 索引类型选择：**
+- `FLAT`：小数据量（<10万），精确搜索
+- `IVF_FLAT`：中等数据量，速度和精度平衡
+- `HNSW`：大数据量，高召回率，内存占用较高
+- `HYBRID`（dense + sparse）：混合检索，适合 RAG 场景
+
+**迁移步骤：**
+1. 设计 Collection Schema（主键、向量字段、标量字段）
+2. 创建索引（向量索引 + 标量索引）
+3. 批量导入数据（`insert` + `flush`）
+4. 验证检索质量（召回率、延迟）
+
+### 分布式锁迁移
+
+| 源方案 | 目标方案 | 迁移要点 |
+|--------|---------|---------|
+| 数据库行锁/悲观锁 | Redisson 分布式锁 | 性能大幅提升，注意锁超时和续期 |
+| `synchronized` | Redisson `RLock` | 单机 → 分布式，注意锁粒度 |
+| 手写 Redis `SET NX` | Redisson 封装 | Redisson 提供看门狗自动续期，避免死锁 |
+| ZooKeeper 锁 | Redisson | 性能更好，但可靠性略低（CP vs AP） |
+
+**Redisson 迁移注意：**
+- 看门狗：默认 30s 续期，业务执行超过 30s 需确认续期逻辑
+- 锁粒度：锁的 key 要精确到业务 ID（如 `lock:order:123`），不要锁整个业务
+- 超时设置：`leaseTime` 要大于业务最长执行时间
+- 可重入：Redisson 默认支持可重入，注意嵌套调用场景
+- Redis 集群：主从切换可能导致锁丢失，生产环境建议 `RedLock` 或 Redisson 的集群模式
 
 ---
 
@@ -208,6 +407,7 @@
 
 | 源 ORM | 目标 ORM | 关键差异 | 注意事项 |
 |--------|---------|---------|---------|
+| MyBatis | MyBatis-Plus | 增强版 MyBatis，CRUD 零 SQL | 兼容原生 MyBatis，XML 映射可直接复用 |
 | MyBatis | JPA/Hibernate | SQL 映射 → 对象关系映射 | 需要重新定义实体关系，注意 N+1 |
 | Django ORM | SQLAlchemy | 活跃记录 → 数据映射器 | 模型定义方式不同 |
 | TypeORM | Prisma | 装饰器 → Schema 文件 | 迁移脚本不兼容，需重新生成 |

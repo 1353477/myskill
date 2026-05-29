@@ -102,12 +102,12 @@ description: Use when writing or refactoring functions, classes, or modules. Ens
 - 通过参数、构造函数、配置传入
 - 测试时可替换为 mock，生产时传入真实实现
 
-### 注释：只解释 why
+### 注释：步骤标注 + 难点解释 why
 
-- 好注释解释决策原因（约束、权衡、历史背景），坏注释复述代码行为
-- 需要注释时，先想能否通过更好的命名消除它
-- 代码本身就是最好的文档
-- 复杂代码块可在关键步骤处加简短注释，帮助读者快速理解流程
+- 代码必须有步骤注释，用简短短语标注每个关键步骤
+- 步骤注释**不加数字编号**
+- 难懂/不直观的地方要解释为什么这样写（约束、权衡、背景原因）
+- 坏注释复述代码行为（好命名能解决的不需要注释）
 
 ```
 ❌ Bad:  // increment counter by 1
@@ -116,13 +116,17 @@ description: Use when writing or refactoring functions, classes, or modules. Ens
 ❌ Bad:  // check if user is active
         if (user.status === 'active') {
 
+❌ Bad:  // 步骤1: 查找已有标签  ← 步骤不要加数字编号
+❌ Bad:  // 第一步：初始化配置    ← 不要写"第一步/第二步"
+
+✅ Good: // 查找已有标签          ← 步骤注释，不加数字
+✅ Good: // 按需关联标签到目标对象
 ✅ Good: // Retry up to 3 times because the downstream service has transient failures
 ✅ Good: // Using UTC here because the legacy API expects UTC timestamps
-✅ Good: // 查找已有标签，不存在则新建
-✅ Good: // 按需关联标签到目标对象
+✅ Good: // 超过重试上限则放弃，避免无限循环  ← 解释为什么这样做
 ```
 
-如果注释在逐行复述显而易见的代码行为，删掉它，改好命名。但复杂逻辑中标注关键步骤的简短注释是合理的。
+如果注释只是在逐行复述显而易见的代码行为，删掉它，改好命名。但步骤标注和难点解释是必须的。
 
 ### 数据：不信任外部输入
 
@@ -158,6 +162,14 @@ Go:       defer resource.Close()
 | 注释复述代码 | 删注释，改命名 |
 | 全局可变状态 | 限制作用域，通过参数传递 |
 | 嵌套 3+ 层 if/for | 提前 return/guard clause，提取子函数 |
+| LLM 输出未做降级 | LLM 调用必须有 try-catch + 默认返回值 |
+| 虚拟线程内用 synchronized | 改用 `ReentrantLock`，避免钉住载体线程 |
+| 微服务间硬编码地址 | 通过服务发现（Nacos）或配置注入 |
+| API Key 硬编码在代码里 | 放环境变量或配置中心 |
+| if-else 按类型分发 | 提取策略接口 + `@PostConstruct` Map 注册 |
+| SSE 连接无回调清理 | 注册 onCompletion/onTimeout/onError + 心跳保活 |
+| 分布式锁无超时 | 设置 leaseTime > 业务最长执行时间 + finally 释放 |
+| 耗时操作在 `@Transactional` 内 | 用 `TransactionSynchronization.afterCommit` 延迟执行 |
 
 ## Red Flags — STOP and Re-examine
 
@@ -168,5 +180,12 @@ Go:       defer resource.Close()
 - 逐行注释解释显而易见的代码行为 → 命名不够好（复杂逻辑中标注关键步骤除外）
 - 修改 A 模块时担心影响 B 模块 → 耦合太高
 - 函数内部 new 了外部依赖 → 依赖不可注入
+- LLM/外部 API 调用没有超时和降级 → 生产环境一定会挂
+- 缓存没有过期策略或没有穿透防护 → 迟早出事故
+- 虚拟线程 + `synchronized` + 外部 I/O → 载体线程被钉，失去虚拟线程优势
+- 按类型 ID 做 if-else 分发 → 应该用策略工厂模式
+- SSE 发送事件未 catch IOException → 客户端断连后线程泄漏
+- 分布式锁未在 finally 中释放 + 未检查 isHeldByCurrentThread → 误释放别人的锁
+- 在 `@Transactional` 方法内做文件上传等耗时操作 → 数据库连接长时间被占用
 
 **When in doubt:** 写能让 6 个月后的自己看懂的代码。不是写给编译器，是写给人。

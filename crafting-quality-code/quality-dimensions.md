@@ -76,7 +76,8 @@ function getFirstActiveUserName(users: User[]): string | null {
 - [ ] 变量/函数/类命名揭示意图，无需猜
 - [ ] 函数长度适中（一屏可见），单一职责
 - [ ] 逻辑线性展开，避免深层嵌套（guard clause 优先）
-- [ ] 注释以解释 why 为主；复杂逻辑中可在关键步骤处加简短注释
+- [ ] 关键步骤有步骤注释（不加数字编号）
+- [ ] 难懂/不直观的地方解释了为什么这样做
 - [ ] 没有晦涩的"聪明"写法（除非性能关键路径且有注释说明）
 - [ ] 代码读起来像自然语言描述
 
@@ -426,5 +427,434 @@ function validateEmail(email: string): boolean {
 
 function validatePhone(phone: string): boolean {
   return /^\+?\d{10,15}$/.test(phone);
+}
+```
+
+---
+
+## 6. Modern Java Patterns（Java 17+ 现代模式）
+
+使用 Java 17+ 特性写更简洁、安全、高效的代码。
+
+### Checklist
+
+- [ ] 不可变 DTO 使用 `record` 而非 Lombok `@Value`
+- [ ] 有限继承体系使用 `sealed class` + `permits`
+- [ ] 类型判断使用 switch 模式匹配替代 if-else instanceof 链
+- [ ] I/O 密集场景使用虚拟线程，配合 `Semaphore` 控制并发
+- [ ] `synchronized` 块替换为 `ReentrantLock`（虚拟线程兼容）
+- [ ] 有序集合操作使用 `SequencedCollection` API
+
+### Good vs Bad
+
+**Java — Record 替代 DTO**
+
+```java
+// ❌ Bad: Lombok @Data 生成可变对象，equals/hashCode 基于所有字段
+@Data
+public class UserDTO {
+    private Long id;
+    private String name;
+    private String email;
+}
+
+// ✅ Good: Record 不可变，自带 equals/hashCode/toString/compact constructor
+public record UserDTO(Long id, String name, String email) {
+    // 可添加紧凑校验
+    public UserDTO {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("name must not be blank");
+        }
+    }
+}
+```
+
+**Java — Sealed Class 替代枚举+接口组合**
+
+```java
+// ❌ Bad: 开放继承，switch 无法穷举
+interface Shape { double area(); }
+class Circle implements Shape { ... }
+class Rectangle implements Shape { ... }
+// 任何人都能新增 Shape 实现，switch 永远需要 default
+
+// ✅ Good: 密封类，编译器强制穷举
+sealed interface Shape permits Circle, Rectangle {
+    double area();
+}
+record Circle(double radius) implements Shape {
+    public double area() { return Math.PI * radius * radius; }
+}
+record Rectangle(double width, double height) implements Shape {
+    public double area() { return width * height; }
+}
+
+// 编译器知道只有两种，忘记一个会报错
+double calculateArea(Shape shape) {
+    return switch (shape) {
+        case Circle c -> c.area();
+        case Rectangle r -> r.area();
+        // 不需要 default — 编译器保证穷举
+    };
+}
+```
+
+**Java — 虚拟线程 + Semaphore**
+
+```java
+// ❌ Bad: 传统线程池处理 I/O 密集任务，线程数受限
+ExecutorService pool = Executors.newFixedThreadPool(50);
+List<Future<String>> futures = urls.stream()
+    .map(url -> pool.submit(() -> httpClient.get(url)))
+    .toList();
+
+// ✅ Good: 虚拟线程轻量（几 KB），可创建百万级，Semaphore 控制对外并发
+try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+    Semaphore semaphore = new Semaphore(MAX_CONCURRENT_REQUESTS);
+    List<Future<String>> futures = urls.stream()
+        .map(url -> executor.submit(() -> {
+            semaphore.acquire();
+            try {
+                return httpClient.get(url);
+            } finally {
+                semaphore.release();
+            }
+        }))
+        .toList();
+    // 收集结果...
+}
+```
+
+---
+
+## 7. LLM Integration Patterns（LLM 集成质量模式）
+
+与 LLM/AI 服务交互时的代码质量要求。
+
+### Checklist
+
+- [ ] LLM 调用有超时控制（HTTP client timeout / SDK timeout）
+- [ ] LLM 输出解析有降级处理（JSON 解析失败返回默认值）
+- [ ] API Key 通过环境变量或配置中心注入，不硬编码
+- [ ] 提示词（prompt）集中管理，不在业务逻辑中拼接大段字符串
+- [ ] LLM 不可用时系统核心功能仍可运行（优雅降级）
+- [ ] 结构化输出使用 JSON Schema 或 Pydantic 校验
+
+### Good vs Bad
+
+**Java — LLM 调用降级**
+
+```java
+// ❌ Bad: LLM 失败直接抛异常，整个请求失败
+public IntentResponse analyzeIntent(String description) {
+    String result = llmClient.chat(systemPrompt, description, true);
+    return objectMapper.readValue(result, IntentResponse.class);
+}
+
+// ✅ Good: 降级处理，LLM 不可用时返回默认值
+public IntentResponse analyzeIntent(String description) {
+    try {
+        String result = llmClient.chat(systemPrompt, description, true);
+        return objectMapper.readValue(result, IntentResponse.class);
+    } catch (Exception e) {
+        log.warn("LLM 意图识别失败，使用降级策略: {}", e.getMessage());
+        IntentResponse fallback = new IntentResponse();
+        fallback.setSimilarAgents(List.of());
+        fallback.setIntentSummary("无法识别意图");
+        return fallback;
+    }
+}
+```
+
+**Python — 结构化输出校验**
+
+```python
+# ❌ Bad: 直接信任 LLM 输出，不做校验
+response = client.chat(prompt="分析情感", text=user_input)
+sentiment = json.loads(response)["sentiment"]  # 可能 KeyError
+
+# ✅ Good: 用 Pydantic 校验，失败有默认值
+class SentimentResult(BaseModel):
+    sentiment: Literal["positive", "negative", "neutral"]
+    confidence: float = Field(ge=0.0, le=1.0)
+
+def analyze_sentiment(text: str) -> SentimentResult:
+    try:
+        response = client.chat(prompt="分析情感", text=text)
+        return SentimentResult.model_validate_json(response)
+    except (json.JSONDecodeError, ValidationError) as e:
+        logger.warning(f"LLM 输出解析失败: {e}")
+        return SentimentResult(sentiment="neutral", confidence=0.0)
+```
+
+---
+
+## 8. Streaming & Resource Patterns（流式与资源质量模式）
+
+处理流式响应、文件流、大文件上传下载时的质量要求。
+
+### Checklist
+
+- [ ] 流式响应中资源在 `finally` 或 try-with-resources 中释放
+- [ ] 异常在流处理中正确传播，不静默吞掉
+- [ ] 大文件用流式处理（`InputStream.transferTo`），不全部加载到内存
+- [ ] 客户端断连时服务端正确释放资源
+
+### Good vs Bad
+
+**Java — 流式响应**
+
+```java
+// ❌ Bad: 全量加载到内存
+public byte[] convertFile(String fileId) {
+    InputStream input = storage.getFile(fileId);
+    return input.readAllBytes();  // 大文件 OOM
+}
+
+// ✅ Good: 流式传输，资源在 finally 释放
+public ResponseEntity<StreamingResponseBody> convertFile(String fileId) {
+    StreamingResponseBody stream = outputStream -> {
+        try (InputStream input = storage.getFile(fileId)) {
+            input.transferTo(outputStream);
+        }
+    };
+    return ResponseEntity.ok()
+            .header("Content-Disposition", "attachment; filename=result.pdf")
+            .body(stream);
+}
+```
+
+---
+
+## 9. Strategy + Factory Pattern（策略工厂模式）
+
+通过策略接口 + 工厂注册实现类型路由，新增类型只加策略实现类，不改工厂代码。
+
+### Checklist
+
+- [ ] 策略接口定义清晰（类型 ID + 业务方法）
+- [ ] 工厂用 `@PostConstruct` + Map 注册，不用 if-else 路由
+- [ ] 策略未找到时抛明确异常（不返回 null）
+- [ ] 新增策略只需加 `@Service` 类，工厂无需改动
+
+### Good vs Bad
+
+**Java — 策略工厂**
+
+```java
+// ❌ Bad: if-else 路由，新增类型要改这里
+public List<?> getList(Integer type, Long projectId) {
+    if (type == 1) {
+        return qualificationService.getList(projectId);
+    } else if (type == 2) {
+        return personnelService.getList(projectId);
+    } else if (type == 3) {
+        // 每次新增类型都要改这个方法...
+    }
+    throw new IllegalArgumentException("不支持: " + type);
+}
+
+// ✅ Good: 策略接口 + 工厂自动注册
+public interface BiddingStrategy {
+    Integer getTypeId();
+    List<?> getList(Long projectId);
+}
+
+@Component
+public class StrategyFactory {
+    @Resource
+    private List<BiddingStrategy> strategies;
+    private final Map<Integer, BiddingStrategy> map = new HashMap<>();
+
+    @PostConstruct
+    public void init() {
+        for (BiddingStrategy s : strategies) {
+            map.put(s.getTypeId(), s);
+        }
+    }
+
+    public BiddingStrategy get(Integer typeId) {
+        BiddingStrategy s = map.get(typeId);
+        if (s == null) throw new BusinessException(400, "不支持的处理类型: " + typeId);
+        return s;
+    }
+}
+```
+
+---
+
+## 10. SSE Streaming Quality（SSE 流式质量）
+
+Server-Sent Events 用于实时推送（如 LLM 流式输出、进度通知），需要正确管理连接生命周期。
+
+### Checklist
+
+- [ ] `SseEmitter` 超时设置合理（LLM 场景建议 0 = 无限，配合心跳）
+- [ ] 注册了 `onCompletion` / `onTimeout` / `onError` 回调清理资源
+- [ ] 有心跳保活机制（防止代理/防火墙关闭长连接）
+- [ ] 发送事件时 try-catch `IOException`，失败时调用 `completeWithError`
+- [ ] 集群场景下 SSE 事件通过 Redis Pub/Sub 广播
+
+### Good vs Bad
+
+**Java — SSE 连接管理**
+
+```java
+// ❌ Bad: 无超时、无心跳、异常不处理
+@GetMapping("/stream")
+public SseEmitter stream() {
+    SseEmitter emitter = new SseEmitter();
+    new Thread(() -> {
+        emitter.send(data);  // IOException 未处理，连接断开后线程泄漏
+    }).start();
+    return emitter;
+}
+
+// ✅ Good: 超时 + 心跳 + 异常处理 + 资源清理
+@GetMapping("/stream/{clientId}")
+public SseEmitter stream(@PathVariable String clientId) {
+    SseEmitter emitter = new SseEmitter(0L);  // 无限超时
+
+    emitter.onCompletion(() -> {
+        log.info("SSE 完成: {}", clientId);
+        connectionManager.remove(clientId);
+    });
+    emitter.onTimeout(() -> {
+        log.warn("SSE 超时: {}", clientId);
+        connectionManager.remove(clientId);
+    });
+
+    // 心跳保活
+    heartbeatScheduler.scheduleAtFixedRate(() -> {
+        try {
+            emitter.send(SseEmitter.event().comment("heartbeat"));
+        } catch (IOException e) {
+            emitter.completeWithError(e);
+        }
+    }, 0, 30, TimeUnit.SECONDS);
+
+    return emitter;
+}
+```
+
+---
+
+## 11. LLM Model Routing（LLM 模型路由）
+
+多模型/多 Provider 场景下的模型选择、缓存和降级策略。
+
+### Checklist
+
+- [ ] 模型配置集中管理（不散落在各 Service 中）
+- [ ] ChatClient 实例缓存（ConcurrentHashMap），避免每次请求重建
+- [ ] 按场景路由到不同模型（通用对话 / 推理 / embedding）
+- [ ] 模型不可用时有降级策略（切换到备用模型）
+- [ ] API Key 通过配置注入，不硬编码
+
+### Good vs Bad
+
+**Java — 多模型路由**
+
+```java
+// ❌ Bad: 每个方法都手动创建模型客户端
+public String analyze(String text) {
+    OpenAiApi api = new OpenAiApi("https://api.openai.com", "sk-hardcoded-key");
+    ChatModel model = new OpenAiChatModel(api, options);
+    return model.call(text);
+}
+
+// ✅ Good: 工厂 + 缓存 + 场景路由
+@Component
+public class ChatClientFactory {
+    private final Map<String, ChatClient> cache = new ConcurrentHashMap<>();
+    private final Map<String, ModelConfig> configs;
+
+    public ChatClient getClient(String scene) {
+        return cache.computeIfAbsent(scene, key -> {
+            ModelConfig config = configs.get(key);
+            OpenAiApi api = OpenAiApi.builder()
+                    .baseUrl(config.getBaseUrl())
+                    .apiKey(config.getApiKey())
+                    .build();
+            ChatModel model = OpenAiChatModel.builder()
+                    .openAiApi(api)
+                    .defaultOptions(buildOptions(config))
+                    .build();
+            return ChatClient.builder(model).build();
+        });
+    }
+}
+```
+
+---
+
+## 12. Async + Transaction Pattern（异步事务模式）
+
+在事务提交后触发异步操作，避免在事务中执行耗时任务。
+
+### Checklist
+
+- [ ] 耗时操作不在 `@Transactional` 方法内直接执行
+- [ ] 使用 `TransactionSynchronizationManager.registerSynchronization` 的 `afterCommit` 回调
+- [ ] `CompletableFuture` 带超时控制，不无限等待
+- [ ] 批量并发用 `CountDownLatch` 或 `CompletableFuture.allOf`，不用顺序循环
+- [ ] 线程池配置合理（core/max/queue），拒绝策略明确
+
+### Good vs Bad
+
+**Java — 事务后异步**
+
+```java
+// ❌ Bad: 耗时操作在事务中执行，事务长时间不提交
+@Transactional
+public void process(Long id) {
+    entity = repository.save(entity);
+    // 文件上传耗时 10s，事务期间数据库连接被占用
+    fileService.uploadToMinio(entity.getFile());
+}
+
+// ✅ Good: 事务提交后异步执行
+@Transactional(rollbackFor = Exception.class)
+public void process(Long id) {
+    repository.save(entity);
+
+    TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+        @Override
+        public void afterCommit() {
+            CompletableFuture.runAsync(() -> {
+                fileService.uploadToMinio(entity.getFile());
+            }, asyncExecutor);
+        }
+    });
+}
+```
+
+**Java — 批量并发 + 超时**
+
+```java
+// ❌ Bad: 顺序处理，100 个文件 × 2s = 200s
+for (File file : files) {
+    uploadService.upload(file);
+}
+
+// ✅ Good: 并发 + 超时 + CountDownLatch
+ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+Semaphore semaphore = new Semaphore(MAX_CONCURRENT);
+CountDownLatch latch = new CountDownLatch(files.length);
+
+for (File file : files) {
+    executor.submit(() -> {
+        semaphore.acquire();
+        try {
+            uploadService.upload(file);
+        } finally {
+            semaphore.release();
+            latch.countDown();
+        }
+    });
+}
+
+if (!latch.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+    throw new BusinessException("批量处理超时");
 }
 ```
